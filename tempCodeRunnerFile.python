@@ -1,0 +1,78 @@
+import cv2
+import numpy as np
+cap = cv2.VideoCapture(0)
+def preprocess_image(frame):
+    # Chuyển đổi ảnh sang không gian màu HSV
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    
+    # Xử lý nhiễu bằng phép lọc Gaussian
+    blurred = cv2.GaussianBlur(hsv, (5, 5), 0)
+    
+    # Phân đoạn ngưỡng để phát hiện vùng da
+    lower_skin = np.array([0, 20, 70], dtype=np.uint8)
+    upper_skin = np.array([20, 255, 255], dtype=np.uint8)
+    mask = cv2.inRange(blurred, lower_skin, upper_skin)
+    
+    # Áp dụng phép giãn mức xám để cải thiện đặc trưng
+    stretched = cv2.equalizeHist(mask)
+    
+    return stretched
+
+def count_fingers(contour):
+    # Tìm đường biên lớn nhất
+    max_contour = max(contour, key=cv2.contourArea)
+    
+    # Vẽ đường biên lớn nhất lên ảnh gốc
+    cv2.drawContours(frame, [max_contour], -1, (0, 255, 0), 2)
+    
+    # Xác định các điểm uốn ngón tay bằng Convex Hull
+    hull = cv2.convexHull(max_contour, returnPoints=False)
+    defects = cv2.convexityDefects(max_contour, hull)
+    
+    count = 0
+    
+    if defects is not None:
+        for i in range(defects.shape[0]):
+            s, e, f, _ = defects[i, 0]
+            start = tuple(max_contour[s][0])
+            end = tuple(max_contour[e][0])
+            far = tuple(max_contour[f][0])
+            
+            # Tính toán góc giữa các đường thẳng
+            angle = calculate_angle(start, far, end)
+            
+            # Điều kiện để xác định điểm uốn ngón tay
+            if angle <= 90:
+                count += 1
+                cv2.circle(frame, far, 5, (0, 0, 255), -1)
+    
+    return count
+
+def calculate_angle(start, far, end):
+    a = np.sqrt((end[0] - far[0])**2 + (end[1] - far[1])**2)
+    b = np.sqrt((start[0] - far[0])**2 + (start[1] - far[1])**2)
+    c = np.sqrt((start[0] - end[0])**2 + (start[1] - end[1])**2)
+    angle = np.arccos((b**2 + c**2 - a**2) / (2*b*c))
+    return np.degrees(angle)
+while True:
+    # Đọc frame từ camera
+    ret, frame = cap.read()
+    
+    # Lật ảnh theo chiều ngang
+    frame = cv2.flip(frame, 1)
+    
+    # Tiền xử lý ảnh
+    processed = preprocess_image(frame)
+    
+    # Tìm các đường biên trong ảnh đã xử lý
+    contours, _ = cv2.findContours(processed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    # Đếm số ngón tay
+    finger_count = 0
+    
+    for contour in contours:
+        if cv2.contourArea(contour) > 1000:
+            finger_count = count_fingers(contour)
+    
+    # Hiển thị số ngón tay trên ảnh
+    cv2.putText(frame, "Finger Count: {}".format(finger_count))
